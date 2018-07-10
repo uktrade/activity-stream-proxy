@@ -80,7 +80,18 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
                 'details': INCORRECT,
             }, status=401)
 
-        remote_address = request.headers['X-Forwarded-For'].split(',')[0].strip()
+        # PaaS appends 2 IPs, where the IP connected from is the first of the two
+        ip_addesses = request.headers['X-Forwarded-For'].split(',')
+        if len(ip_addesses) < 2:
+            app_logger.warning(
+                'Failed authentication: the X-Forwarded-For header does not '
+                'contain enough IP addresses'
+            )
+            return web.json_response({
+                'details': INCORRECT,
+            }, status=401)
+
+        remote_address = ip_addesses[-2].strip()
 
         if remote_address not in ip_whitelist:
             app_logger.warning(
