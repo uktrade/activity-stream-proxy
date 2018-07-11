@@ -71,7 +71,7 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
         )
 
     @web.middleware
-    async def authenticate(request, handler):
+    async def authenticate_by_ip(request, handler):
         if 'X-Forwarded-For' not in request.headers:
             app_logger.warning(
                 'Failed authentication: no X-Forwarded-For header passed'
@@ -80,7 +80,18 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
                 'details': INCORRECT,
             }, status=401)
 
-        remote_address = request.headers['X-Forwarded-For'].split(',')[0].strip()
+        # PaaS appends 2 IPs, where the IP connected from is the first of the two
+        ip_addesses = request.headers['X-Forwarded-For'].split(',')
+        if len(ip_addesses) < 2:
+            app_logger.warning(
+                'Failed authentication: the X-Forwarded-For header does not '
+                'contain enough IP addresses'
+            )
+            return web.json_response({
+                'details': INCORRECT,
+            }, status=401)
+
+        remote_address = ip_addesses[-2].strip()
 
         if remote_address not in ip_whitelist:
             app_logger.warning(
@@ -91,6 +102,10 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
                 'details': INCORRECT,
             }, status=401)
 
+        return await handler(request)
+
+    @web.middleware
+    async def authenticate_by_hawk(request, handler):
         if 'Authorization' not in request.headers:
             return web.json_response({
                 'details': NOT_PROVIDED,
@@ -115,7 +130,7 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
         return web.json_response({'secret': 'to-be-hidden'})
 
     app_logger.debug('Creating listening web application...')
-    app = web.Application(middlewares=[authenticate])
+    app = web.Application(middlewares=[authenticate_by_ip, authenticate_by_hawk])
     app.add_routes([web.post('/', handle)])
     access_log_format = '%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i" %{X-Forwarded-For}i'
 
