@@ -58,7 +58,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         text, status = self.loop.run_until_complete(post_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Authentication credentials were not provided."}')
@@ -69,7 +69,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-incorrect', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -84,7 +84,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-2', url, 'POST', '', '',
         )
@@ -99,7 +99,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
@@ -114,7 +114,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', 'content', '',
         )
@@ -129,7 +129,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
         )
@@ -144,7 +144,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
         )
@@ -159,7 +159,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         past = datetime.datetime.now() + datetime.timedelta(seconds=-61)
         with freeze_time(past):
             auth = auth_header(
@@ -176,7 +176,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -202,7 +202,7 @@ class TestAuthentication(TestBase):
             asyncio.ensure_future(run_application(), loop=self.loop)
             is_http_accepted_eventually()
 
-            url = 'http://127.0.0.1:8080/'
+            url = 'http://127.0.0.1:8080/hawk/'
             x_forwarded_for = '1.2.3.4, 4.4.4.4'
 
             with freeze_time(past):
@@ -224,7 +224,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -238,7 +238,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -253,7 +253,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -268,7 +268,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -283,7 +283,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -298,7 +298,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
@@ -313,7 +313,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-2', 'incoming-some-secret-2', url, 'POST', '', '',
         )
@@ -328,7 +328,7 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
             'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
