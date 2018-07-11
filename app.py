@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import itertools
 import logging
 import os
@@ -35,18 +36,19 @@ async def run_application():
     )
 
 
+def lookup_credentials(incoming_key_pairs, passed_access_key_id):
+    if passed_access_key_id not in incoming_key_pairs:
+        raise HawkFail(f'No Hawk ID of {passed_access_key_id}')
+
+    return {
+        'id': passed_access_key_id,
+        'key': incoming_key_pairs[passed_access_key_id],
+        'algorithm': 'sha256',
+    }
+
+
 async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app_logger = logging.getLogger(__name__)
-
-    def lookup_credentials(passed_access_key_id):
-        if passed_access_key_id not in incoming_key_pairs:
-            raise HawkFail(f'No Hawk ID of {passed_access_key_id}')
-
-        return {
-            'id': passed_access_key_id,
-            'key': incoming_key_pairs[passed_access_key_id],
-            'algorithm': 'sha256',
-        }
 
     # This would need to be stored externally if this was ever to be load balanced,
     # otherwise replay attacks could succeed by hitting another instance
@@ -61,7 +63,7 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
 
     async def raise_if_not_authentic(request):
         mohawk.Receiver(
-            lookup_credentials,
+            functools.partial(lookup_credentials, incoming_key_pairs),
             request.headers['Authorization'],
             str(request.url),
             request.method,
