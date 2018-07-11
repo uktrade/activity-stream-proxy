@@ -66,10 +66,10 @@ class TestDigestAuthentication(TestBase):
         headers = {
             'X-Forwarded-For': '1.2.3.4, 4.4.4.4',
         }
-        post_func = functools.partial(requests.post, url, auth=auth, headers=headers)
+        get_func = functools.partial(requests.get, url, auth=auth, headers=headers)
 
         async def fetch():
-            return await asyncio.get_event_loop().run_in_executor(None, post_func)
+            return await asyncio.get_event_loop().run_in_executor(None, get_func)
 
         response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
         self.assertEqual(response.status_code, 200)
@@ -85,7 +85,7 @@ class TestHawkAuthentication(TestBase):
         is_http_accepted_eventually()
 
         url = 'http://127.0.0.1:8080/hawk/'
-        text, status, _ = self.loop.run_until_complete(post_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
+        text, status, _ = self.loop.run_until_complete(get_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Authentication credentials were not provided."}')
 
@@ -97,10 +97,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-incorrect', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-incorrect', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -112,10 +112,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-2', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-2', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -127,10 +127,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -142,10 +142,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', 'content', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', 'content', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -157,10 +157,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', 'some-type',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -172,11 +172,11 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', 'some-type',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
         _, status, _ = self.loop.run_until_complete(
-            post_text_no_content_type(url, auth, x_forwarded_for))
+            get_text_no_content_type(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
 
     def test_time_skew_then_401(self):
@@ -189,10 +189,10 @@ class TestHawkAuthentication(TestBase):
         past = datetime.datetime.now() + datetime.timedelta(seconds=-61)
         with freeze_time(past):
             auth = auth_header(
-                'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+                'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
             )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -204,13 +204,13 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        _, status_1, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        _, status_1, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status_1, 200)
 
-        text_2, status_2, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text_2, status_2, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status_2, 401)
         self.assertEqual(text_2, '{"details": "Incorrect authentication credentials."}')
 
@@ -233,15 +233,15 @@ class TestHawkAuthentication(TestBase):
 
             with freeze_time(past):
                 auth = auth_header(
-                    'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+                    'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
                 )
                 _, status_1, _ = self.loop.run_until_complete(
-                    post_text(url, auth, x_forwarded_for))
+                    get_text(url, auth, x_forwarded_for))
             self.assertEqual(status_1, 200)
 
             with freeze_time(now):
                 _, status_2, _ = self.loop.run_until_complete(
-                    post_text(url, auth, x_forwarded_for))
+                    get_text(url, auth, x_forwarded_for))
             self.assertEqual(status_2, 200)
 
     def test_no_x_forwarded_for_401(self):
@@ -252,9 +252,9 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
-        text, status, _ = self.loop.run_until_complete(post_text_no_x_forwarded_for(url, auth))
+        text, status, _ = self.loop.run_until_complete(get_text_no_x_forwarded_for(url, auth))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -266,10 +266,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -281,10 +281,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -296,10 +296,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6, 1.2.3.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -311,10 +311,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 3.4.5.6, 7.8.9.10'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -326,10 +326,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6, 1.2.3.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -341,14 +341,14 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-2', 'incoming-some-secret-2', url, 'POST', '', '',
+            'incoming-some-id-2', 'incoming-some-secret-2', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 200)
         self.assertEqual(text, '{"secret": "to-be-hidden"}')
 
-    def test_post_returns_object(self):
+    def test_get_returns_object(self):
         self.setup_manual()
 
         asyncio.ensure_future(run_application(), loop=self.loop)
@@ -356,10 +356,10 @@ class TestHawkAuthentication(TestBase):
 
         url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status, _ = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 200)
         self.assertEqual(text, '{"secret": "to-be-hidden"}')
 
@@ -413,9 +413,9 @@ def auth_header(key_id, secret_key, url, method, content, content_type):
     }, url, method, content=content, content_type=content_type).request_header
 
 
-async def post_text(url, auth, x_forwarded_for):
+async def get_text(url, auth, x_forwarded_for):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
             'Authorization': auth,
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
@@ -423,28 +423,28 @@ async def post_text(url, auth, x_forwarded_for):
     return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_auth(url, x_forwarded_for):
+async def get_text_no_auth(url, x_forwarded_for):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
         }, timeout=1)
     return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_x_forwarded_for(url, auth):
+async def get_text_no_x_forwarded_for(url, auth):
     async with aiohttp.ClientSession() as session:
         headers = {
             'Authorization': auth,
             'Content-Type': '',
         }
-        result = await session.post(url, headers=headers, timeout=1)
+        result = await session.get(url, headers=headers, timeout=1)
     return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_content_type(url, auth, x_forwarded_for):
+async def get_text_no_content_type(url, auth, x_forwarded_for):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
             'Authorization': auth,
             'X-Forwarded-For': x_forwarded_for,
         }, timeout=1)

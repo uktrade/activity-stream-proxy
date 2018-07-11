@@ -234,11 +234,11 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app = web.Application(middlewares=[authenticate_by_ip(ip_whitelist)])
 
     hawk_app = web.Application(middlewares=[authenticate_by_hawk(incoming_key_pairs)])
-    hawk_app.add_routes([web.post('/', handle)])
+    hawk_app.add_routes([web.get('/', handle)])
     app.add_subapp('/hawk/', hawk_app)
 
     digest_app = web.Application(middlewares=[authenticate_by_digest(incoming_key_pairs)])
-    digest_app.add_routes([web.post('/', handle)])
+    digest_app.add_routes([web.get('/', handle)])
     app.add_subapp('/digest/', digest_app)
 
     access_log_format = '%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i" %{X-Forwarded-For}i'
