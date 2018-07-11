@@ -50,7 +50,7 @@ class TestConnection(TestBase):
         self.assertTrue(is_http_accepted_eventually())
 
 
-class TestAuthentication(TestBase):
+class TestHawkAuthentication(TestBase):
 
     def test_no_auth_then_401(self):
         self.setup_manual()
