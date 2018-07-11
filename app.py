@@ -1,8 +1,12 @@
 import asyncio
+import hashlib
+import hmac
 import functools
 import itertools
 import logging
 import os
+import re
+import secrets
 import sys
 import time
 
@@ -136,6 +140,90 @@ def authenticate_by_hawk(incoming_key_pairs):
     return _authenticate_by_hawk
 
 
+def authenticate_by_digest(incoming_key_pairs):
+    app_logger = logging.getLogger(__name__)
+
+    # This would need to be stored externally if this was ever to be load balanced,
+    # otherwise replay attacks could succeed by hitting another instance
+    server_nonces_generated = ExpiringSet(NONCE_EXPIRE)
+    server_nonces_used = ExpiringSet(NONCE_EXPIRE)
+    client_nonces_used = ExpiringSet(NONCE_EXPIRE)
+
+    correct_realm = 'activity-stream'
+    correct_qop = 'auth'
+
+    def secure_compare(val_a, val_b):
+        return hmac.compare_digest(val_a, val_b)
+
+    def www_authenticate_401():
+        nonce = secrets.token_hex(64)
+        server_nonces_generated.add(nonce)
+        www_authenticate = f'Digest ' + \
+                           f'realm="{correct_realm}", ' + \
+                           f'qop="{correct_qop}", ' + \
+                           f'algorithm=SHA-256, ' + \
+                           f'nonce="{nonce}", '
+
+        return web.json_response({
+            'details': INCORRECT,
+        }, headers={
+            'WWW-Authenticate': www_authenticate,
+        }, status=401)
+
+    @web.middleware
+    async def _authenticate_by_digest(request, handler):
+        if 'Authorization' not in request.headers:
+            return www_authenticate_401()
+
+        header = request.headers['Authorization']
+        components = dict(re.findall(r'([a-z]+)="([^"]+)"', header))
+
+        bad_nonce = \
+            components['nonce'] not in server_nonces_generated or \
+            components['nonce'] in server_nonces_used or \
+            components['cnonce'] in client_nonces_used
+        if bad_nonce:
+            app_logger.warning('bad nonce')
+            return www_authenticate_401()
+
+        matching_pairs = [
+            (key_id, secret_key)
+            for (key_id, secret_key) in incoming_key_pairs.items()
+            if secure_compare(components['username'], key_id)
+        ]
+
+        if not matching_pairs:
+            app_logger.warning('Username of %s not found', components['username'])
+            return www_authenticate_401()
+
+        correct_username, correct_password = matching_pairs[0]
+
+        def hex_hash(string):
+            return hashlib.sha256(string.encode('utf-8')).hexdigest()
+
+        hmac_data_hash = hex_hash(
+            f'{request.method}:{request.url.path}')
+        hmac_secret_hash = hex_hash(
+            f'{correct_username}:{correct_realm}:{correct_password}')
+
+        nonce_c = '00000001'  # We only allow cnonce to be used once
+        hmac_value = hex_hash(
+            f'{hmac_secret_hash}:{components["nonce"]}:'
+            f'{nonce_c}:{components["cnonce"]}:{correct_qop}:'
+            f'{hmac_data_hash}')
+
+        if not secure_compare(components['response'], hmac_value):
+            app_logger.warning('Response incorrect')
+            return www_authenticate_401()
+
+        server_nonces_used.add(components['nonce'])
+        client_nonces_used.add(components['cnonce'])
+
+        return await handler(request)
+
+    return _authenticate_by_digest
+
+
 async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app_logger = logging.getLogger(__name__)
 
@@ -147,8 +235,11 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
 
     hawk_app = web.Application(middlewares=[authenticate_by_hawk(incoming_key_pairs)])
     hawk_app.add_routes([web.post('/', handle)])
-
     app.add_subapp('/hawk/', hawk_app)
+
+    digest_app = web.Application(middlewares=[authenticate_by_digest(incoming_key_pairs)])
+    digest_app.add_routes([web.post('/', handle)])
+    app.add_subapp('/digest/', digest_app)
 
     access_log_format = '%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i" %{X-Forwarded-For}i'
 
