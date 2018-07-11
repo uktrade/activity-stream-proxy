@@ -47,19 +47,20 @@ def lookup_credentials(incoming_key_pairs, passed_access_key_id):
     }
 
 
+def seen_nonce(seen_nonces, access_key_id, nonce, _):
+    nonce_tuple = (access_key_id, nonce)
+    seen = nonce_tuple in seen_nonces
+    if not seen:
+        seen_nonces.add(nonce_tuple)
+    return seen
+
+
 async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app_logger = logging.getLogger(__name__)
 
     # This would need to be stored externally if this was ever to be load balanced,
     # otherwise replay attacks could succeed by hitting another instance
     seen_nonces = ExpiringSet(NONCE_EXPIRE)
-
-    def seen_nonce(access_key_id, nonce, _):
-        nonce_tuple = (access_key_id, nonce)
-        seen = nonce_tuple in seen_nonces
-        if not seen:
-            seen_nonces.add(nonce_tuple)
-        return seen
 
     async def raise_if_not_authentic(request):
         mohawk.Receiver(
@@ -69,7 +70,7 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
             request.method,
             content=await request.content.read(),
             content_type=request.headers['Content-Type'],
-            seen_nonce=seen_nonce,
+            seen_nonce=functools.partial(seen_nonce, seen_nonces),
         )
 
     @web.middleware
