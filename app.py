@@ -94,8 +94,23 @@ def authenticate_by_ip(ip_whitelist):
     return _authenticate_by_ip
 
 
-def authenticate_by_hawk(raise_if_not_authentic):
+def authenticate_by_hawk(incoming_key_pairs):
     app_logger = logging.getLogger(__name__)
+
+    # This would need to be stored externally if this was ever to be load balanced,
+    # otherwise replay attacks could succeed by hitting another instance
+    seen_nonces = ExpiringSet(NONCE_EXPIRE)
+
+    async def raise_if_not_authentic(request):
+        mohawk.Receiver(
+            functools.partial(lookup_credentials, incoming_key_pairs),
+            request.headers['Authorization'],
+            str(request.url),
+            request.method,
+            content=await request.content.read(),
+            content_type=request.headers['Content-Type'],
+            seen_nonce=functools.partial(seen_nonce, seen_nonces),
+        )
 
     @web.middleware
     async def _authenticate_by_hawk(request, handler):
@@ -124,28 +139,13 @@ def authenticate_by_hawk(raise_if_not_authentic):
 async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app_logger = logging.getLogger(__name__)
 
-    # This would need to be stored externally if this was ever to be load balanced,
-    # otherwise replay attacks could succeed by hitting another instance
-    seen_nonces = ExpiringSet(NONCE_EXPIRE)
-
-    async def raise_if_not_authentic(request):
-        mohawk.Receiver(
-            functools.partial(lookup_credentials, incoming_key_pairs),
-            request.headers['Authorization'],
-            str(request.url),
-            request.method,
-            content=await request.content.read(),
-            content_type=request.headers['Content-Type'],
-            seen_nonce=functools.partial(seen_nonce, seen_nonces),
-        )
-
     async def handle(_):
         return web.json_response({'secret': 'to-be-hidden'})
 
     app_logger.debug('Creating listening web application...')
     app = web.Application(middlewares=[authenticate_by_ip(ip_whitelist)])
 
-    hawk_app = web.Application(middlewares=[authenticate_by_hawk(raise_if_not_authentic)])
+    hawk_app = web.Application(middlewares=[authenticate_by_hawk(incoming_key_pairs)])
     hawk_app.add_routes([web.post('/', handle)])
 
     app.add_subapp('/hawk/', hawk_app)
