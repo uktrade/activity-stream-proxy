@@ -415,6 +415,7 @@ async def get_text(url, auth, x_forwarded_for):
             'Authorization': auth,
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
     return (await result.text(), result.status, result.headers)
 
@@ -424,6 +425,7 @@ async def get_text_no_auth(url, x_forwarded_for):
         result = await session.get(url, headers={
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
     return (await result.text(), result.status, result.headers)
 
@@ -433,6 +435,7 @@ async def get_text_no_x_forwarded_for(url, auth):
         headers = {
             'Authorization': auth,
             'Content-Type': '',
+            'X-Forwarded-Proto': 'http',
         }
         result = await session.get(url, headers=headers, timeout=1)
     return (await result.text(), result.status, result.headers)
@@ -443,6 +446,7 @@ async def get_text_no_content_type(url, auth, x_forwarded_for):
         result = await session.get(url, headers={
             'Authorization': auth,
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
 
     return (await result.text(), result.status, result.headers)

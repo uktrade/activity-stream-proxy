@@ -113,7 +113,7 @@ def authenticate_by_hawk(incoming_key_pairs):
         mohawk.Receiver(
             functools.partial(lookup_credentials, incoming_key_pairs),
             request.headers['Authorization'],
-            str(request.url),
+            str(request.url.with_scheme(request.headers['X-Forwarded-Proto'])),
             request.method,
             content=await request.content.read(),
             content_type=request.headers['Content-Type'],
