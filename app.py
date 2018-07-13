@@ -29,14 +29,18 @@ async def run_application():
     env = normalise_environment(os.environ)
     port = env['PORT']
 
-    incoming_key_pairs = {
+    incoming_key_pairs_hawk = {
         key_pair['KEY_ID']: key_pair['SECRET_KEY']
-        for key_pair in env['INCOMING_ACCESS_KEY_PAIRS']
+        for key_pair in env['INCOMING_ACCESS_KEY_PAIRS_HAWK']
+    }
+    incoming_key_pairs_digest = {
+        key_pair['KEY_ID']: key_pair['SECRET_KEY']
+        for key_pair in env['INCOMING_ACCESS_KEY_PAIRS_DIGEST']
     }
     ip_whitelist = env['INCOMING_IP_WHITELIST']
 
     await create_incoming_application(
-        port, ip_whitelist, incoming_key_pairs,
+        port, ip_whitelist, incoming_key_pairs_hawk, incoming_key_pairs_digest,
     )
 
 
@@ -224,7 +228,8 @@ def authenticate_by_digest(incoming_key_pairs):
     return _authenticate_by_digest
 
 
-async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
+async def create_incoming_application(port, ip_whitelist,
+                                      incoming_key_pairs_hawk, incoming_key_pairs_digest):
     app_logger = logging.getLogger(__name__)
 
     async def handle(_):
@@ -233,11 +238,11 @@ async def create_incoming_application(port, ip_whitelist, incoming_key_pairs):
     app_logger.debug('Creating listening web application...')
     app = web.Application(middlewares=[authenticate_by_ip(ip_whitelist)])
 
-    hawk_app = web.Application(middlewares=[authenticate_by_hawk(incoming_key_pairs)])
+    hawk_app = web.Application(middlewares=[authenticate_by_hawk(incoming_key_pairs_hawk)])
     hawk_app.add_routes([web.get('/', handle)])
     app.add_subapp('/hawk/', hawk_app)
 
-    digest_app = web.Application(middlewares=[authenticate_by_digest(incoming_key_pairs)])
+    digest_app = web.Application(middlewares=[authenticate_by_digest(incoming_key_pairs_digest)])
     digest_app.add_routes([web.get('/', handle)])
     app.add_subapp('/digest/', digest_app)
 
