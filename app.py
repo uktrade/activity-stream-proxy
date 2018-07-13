@@ -154,7 +154,7 @@ def authenticate_by_digest(incoming_key_pairs):
     client_nonces_used = ExpiringSet(NONCE_EXPIRE)
 
     correct_realm = 'activity-stream'
-    correct_qop = 'auth'
+    correct_qop = 'auth-int'
 
     def secure_compare(val_a, val_b):
         return hmac.compare_digest(val_a, val_b)
@@ -205,8 +205,9 @@ def authenticate_by_digest(incoming_key_pairs):
         def hex_hash(string):
             return hashlib.sha256(string.encode('utf-8')).hexdigest()
 
+        hmac_body_hash = hex_hash((await request.read()).decode('utf-8'))
         hmac_data_hash = hex_hash(
-            f'{request.method}:{request.url.path}')
+            f'{request.method}:{request.url.path}:{hmac_body_hash}')
         hmac_secret_hash = hex_hash(
             f'{correct_username}:{correct_realm}:{correct_password}')
 

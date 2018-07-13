@@ -1,8 +1,7 @@
 import asyncio
 import datetime
-import functools
 import os
-from subprocess import Popen
+from subprocess import Popen, check_output
 import sys
 import unittest
 from unittest.mock import patch
@@ -10,8 +9,6 @@ from unittest.mock import patch
 import aiohttp
 from freezegun import freeze_time
 import mohawk
-import requests
-from requests.auth import HTTPDigestAuth
 
 from app import run_application
 
@@ -61,19 +58,18 @@ class TestDigestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/digest/'
-        auth = HTTPDigestAuth('incoming-some-id-1', 'incoming-some-secret-1')
-        headers = {
-            'X-Forwarded-For': '1.2.3.4, 4.4.4.4',
-        }
-        get_func = functools.partial(requests.get, url, auth=auth, headers=headers)
+        command = [
+            'curl', '-D', '-',
+            '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1',
+            'http://127.0.0.1:8080/digest/',
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0'
+        ]
 
         async def fetch():
-            return await asyncio.get_event_loop().run_in_executor(None, get_func)
+            return await asyncio.get_event_loop().run_in_executor(None, check_output, command)
 
         response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text, '{"secret": "to-be-hidden"}')
+        self.assertIn(b'{"secret": "to-be-hidden"}', response)
 
 
 class TestHawkAuthentication(TestBase):
