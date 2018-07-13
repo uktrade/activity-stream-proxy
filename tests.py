@@ -62,7 +62,9 @@ class TestDigestAuthentication(TestBase):
             'curl', '-D', '-',
             '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1',
             'http://127.0.0.1:8080/digest/',
-            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0'
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0',
+            # Curl support auth-int, but _only_ if the body is the empty string
+            '-X', 'GET', '-d', '',
         ]
 
         async def fetch():
@@ -81,7 +83,9 @@ class TestDigestAuthentication(TestBase):
             'curl', '-D', '-',
             '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1-incorrect',
             'http://127.0.0.1:8080/digest/',
-            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0'
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0',
+            # Curl support auth-int, but _only_ if the body is the empty string
+            '-X', 'GET', '-d', '',
         ]
 
         async def fetch():
