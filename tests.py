@@ -71,6 +71,27 @@ class TestDigestAuthentication(TestBase):
         response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
         self.assertIn(b'{"secret": "to-be-hidden"}', response)
 
+    def test_bad_signature(self):
+        self.setup_manual()
+
+        asyncio.ensure_future(run_application(), loop=self.loop)
+        is_http_accepted_eventually()
+
+        command = [
+            'curl', '-D', '-',
+            '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1-incorrect',
+            'http://127.0.0.1:8080/digest/',
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0'
+        ]
+
+        async def fetch():
+            return await asyncio.get_event_loop().run_in_executor(None, check_output, command)
+
+        response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
+        self.assertIn(b'HTTP/1.1 401', response)
+        self.assertNotIn(b'HTTP/1.1 200', response)
+        self.assertNotIn(b'{"secret": "to-be-hidden"}', response)
+
 
 class TestHawkAuthentication(TestBase):
 
