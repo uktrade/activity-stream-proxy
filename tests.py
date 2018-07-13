@@ -1,6 +1,8 @@
 import asyncio
 import datetime
+import hashlib
 import os
+import re
 from subprocess import Popen, check_output
 import sys
 import unittest
@@ -95,6 +97,44 @@ class TestDigestAuthentication(TestBase):
         self.assertIn(b'HTTP/1.1 401', response)
         self.assertNotIn(b'HTTP/1.1 200', response)
         self.assertNotIn(b'{"secret": "to-be-hidden"}', response)
+
+    def test_replay_prevented(self):
+        self.setup_manual()
+        asyncio.ensure_future(run_application(), loop=self.loop)
+        is_http_accepted_eventually()
+
+        url = 'http://127.0.0.1:8080/digest/'
+        _, _, headers = self.loop.run_until_complete(get_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
+        components = dict(re.findall(r'([a-z]+)="([^"]+)"', headers['WWW-Authenticate']))
+        nonce = components['nonce']
+        realm = components['realm']
+
+        body = '{}'
+
+        def hex_hash(string):
+            return hashlib.sha256(string.encode('utf-8')).hexdigest()
+
+        def get_auth_header():
+            cnonce = 'something'
+            nonce_c = '00000001'
+            hmac_body_hash = hex_hash(body)
+            hmac_data_hash = hex_hash(f'GET:/digest/:{hmac_body_hash}')
+            hmac_secret_hash = hex_hash(f'incoming-some-id-1:{realm}:incoming-some-secret-1')
+            hmac_value = hex_hash(
+                f'{hmac_secret_hash}:{nonce}:{nonce_c}:{cnonce}:auth-int:{hmac_data_hash}')
+            return f'Digest username="incoming-some-id-1", nonce="{nonce}", ' + \
+                   f'cnonce="{cnonce}", response="{hmac_value}"'
+
+        authorization = get_auth_header()
+        text, status, _ = self.loop.run_until_complete(
+            get_text_data(url, authorization, '1.2.3.4, 4.4.4.4', body))
+        self.assertEqual(status, 200)
+        self.assertEqual(text, '{"secret": "to-be-hidden"}')
+
+        text, status, _ = self.loop.run_until_complete(
+            get_text_data(url, authorization, '1.2.3.4, 4.4.4.4', body))
+        self.assertEqual(status, 401)
+        self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
 
 class TestHawkAuthentication(TestBase):
@@ -442,6 +482,17 @@ async def get_text(url, auth, x_forwarded_for):
             'X-Forwarded-For': x_forwarded_for,
             'X-Forwarded-Proto': 'http',
         }, timeout=1)
+    return (await result.text(), result.status, result.headers)
+
+
+async def get_text_data(url, auth, x_forwarded_for, data):
+    async with aiohttp.ClientSession() as session:
+        result = await session.get(url, headers={
+            'Authorization': auth,
+            'Content-Type': '',
+            'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
+        }, data=data, timeout=1)
     return (await result.text(), result.status, result.headers)
 
 
