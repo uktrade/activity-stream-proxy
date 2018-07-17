@@ -1,7 +1,9 @@
 import asyncio
 import datetime
+import hashlib
 import os
-from subprocess import Popen
+import re
+from subprocess import Popen, check_output
 import sys
 import unittest
 from unittest.mock import patch
@@ -50,7 +52,92 @@ class TestConnection(TestBase):
         self.assertTrue(is_http_accepted_eventually())
 
 
-class TestAuthentication(TestBase):
+class TestDigestAuthentication(TestBase):
+
+    def test_happy_path(self):
+        self.setup_manual()
+
+        asyncio.ensure_future(run_application(), loop=self.loop)
+        is_http_accepted_eventually()
+
+        command = [
+            'curl', '-D', '-',
+            '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1',
+            'http://127.0.0.1:8080/digest/',
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0',
+            # Curl support auth-int, but _only_ if the body is the empty string
+            '-X', 'GET', '-d', '',
+        ]
+
+        async def fetch():
+            return await asyncio.get_event_loop().run_in_executor(None, check_output, command)
+
+        response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
+        self.assertIn(b'{"secret": "to-be-hidden"}', response)
+
+    def test_bad_signature(self):
+        self.setup_manual()
+
+        asyncio.ensure_future(run_application(), loop=self.loop)
+        is_http_accepted_eventually()
+
+        command = [
+            'curl', '-D', '-',
+            '--digest', '-u', 'incoming-some-id-1:incoming-some-secret-1-incorrect',
+            'http://127.0.0.1:8080/digest/',
+            '--header', 'X-Forwarded-For: 1.2.3.4, 0.0.0.0',
+            # Curl support auth-int, but _only_ if the body is the empty string
+            '-X', 'GET', '-d', '',
+        ]
+
+        async def fetch():
+            return await asyncio.get_event_loop().run_in_executor(None, check_output, command)
+
+        response = self.loop.run_until_complete(asyncio.ensure_future(fetch()))
+        self.assertIn(b'HTTP/1.1 401', response)
+        self.assertNotIn(b'HTTP/1.1 200', response)
+        self.assertNotIn(b'{"secret": "to-be-hidden"}', response)
+
+    def test_replay_prevented(self):
+        self.setup_manual()
+        asyncio.ensure_future(run_application(), loop=self.loop)
+        is_http_accepted_eventually()
+
+        url = 'http://127.0.0.1:8080/digest/'
+        _, _, headers = self.loop.run_until_complete(get_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
+        components = dict(re.findall(r'([a-z]+)="([^"]+)"', headers['WWW-Authenticate']))
+        nonce = components['nonce']
+        realm = components['realm']
+
+        body = '{}'
+
+        def hex_hash(string):
+            return hashlib.sha256(string.encode('utf-8')).hexdigest()
+
+        def get_auth_header():
+            cnonce = 'something'
+            nonce_c = '00000001'
+            hmac_body_hash = hex_hash(body)
+            hmac_data_hash = hex_hash(f'GET:/digest/:{hmac_body_hash}')
+            hmac_secret_hash = hex_hash(f'incoming-some-id-1:{realm}:incoming-some-secret-1')
+            hmac_value = hex_hash(
+                f'{hmac_secret_hash}:{nonce}:{nonce_c}:{cnonce}:auth-int:{hmac_data_hash}')
+            return f'Digest username="incoming-some-id-1", nonce="{nonce}", ' + \
+                   f'cnonce="{cnonce}", response="{hmac_value}"'
+
+        authorization = get_auth_header()
+        text, status, _ = self.loop.run_until_complete(
+            get_text_data(url, authorization, '1.2.3.4, 4.4.4.4', body))
+        self.assertEqual(status, 200)
+        self.assertEqual(text, '{"secret": "to-be-hidden"}')
+
+        text, status, _ = self.loop.run_until_complete(
+            get_text_data(url, authorization, '1.2.3.4, 4.4.4.4', body))
+        self.assertEqual(status, 401)
+        self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
+
+
+class TestHawkAuthentication(TestBase):
 
     def test_no_auth_then_401(self):
         self.setup_manual()
@@ -58,8 +145,8 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
-        text, status = self.loop.run_until_complete(post_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
+        url = 'http://127.0.0.1:8080/hawk/'
+        text, status, _ = self.loop.run_until_complete(get_text_no_auth(url, '1.2.3.4, 4.4.4.4'))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Authentication credentials were not provided."}')
 
@@ -69,12 +156,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-incorrect', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-incorrect', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -84,12 +171,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-2', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-2', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -99,12 +186,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -114,12 +201,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', 'content', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', 'content', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -129,12 +216,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', 'some-type',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -144,13 +231,13 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', 'some-type',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', 'some-type',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        _, status = self.loop.run_until_complete(
-            post_text_no_content_type(url, auth, x_forwarded_for))
+        _, status, _ = self.loop.run_until_complete(
+            get_text_no_content_type(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
 
     def test_time_skew_then_401(self):
@@ -159,14 +246,14 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         past = datetime.datetime.now() + datetime.timedelta(seconds=-61)
         with freeze_time(past):
             auth = auth_header(
-                'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+                'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
             )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -176,15 +263,15 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        _, status_1 = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        _, status_1, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status_1, 200)
 
-        text_2, status_2 = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text_2, status_2, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status_2, 401)
         self.assertEqual(text_2, '{"details": "Incorrect authentication credentials."}')
 
@@ -202,20 +289,20 @@ class TestAuthentication(TestBase):
             asyncio.ensure_future(run_application(), loop=self.loop)
             is_http_accepted_eventually()
 
-            url = 'http://127.0.0.1:8080/'
+            url = 'http://127.0.0.1:8080/hawk/'
             x_forwarded_for = '1.2.3.4, 4.4.4.4'
 
             with freeze_time(past):
                 auth = auth_header(
-                    'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+                    'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
                 )
-                _, status_1 = self.loop.run_until_complete(
-                    post_text(url, auth, x_forwarded_for))
+                _, status_1, _ = self.loop.run_until_complete(
+                    get_text(url, auth, x_forwarded_for))
             self.assertEqual(status_1, 200)
 
             with freeze_time(now):
-                _, status_2 = self.loop.run_until_complete(
-                    post_text(url, auth, x_forwarded_for))
+                _, status_2, _ = self.loop.run_until_complete(
+                    get_text(url, auth, x_forwarded_for))
             self.assertEqual(status_2, 200)
 
     def test_no_x_forwarded_for_401(self):
@@ -224,11 +311,11 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
-        text, status = self.loop.run_until_complete(post_text_no_x_forwarded_for(url, auth))
+        text, status, _ = self.loop.run_until_complete(get_text_no_x_forwarded_for(url, auth))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -238,12 +325,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -253,12 +340,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -268,12 +355,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6, 1.2.3.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -283,12 +370,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 3.4.5.6, 7.8.9.10'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -298,12 +385,12 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '3.4.5.6, 1.2.3.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 401)
         self.assertEqual(text, '{"details": "Incorrect authentication credentials."}')
 
@@ -313,27 +400,27 @@ class TestAuthentication(TestBase):
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-2', 'incoming-some-secret-2', url, 'POST', '', '',
+            'incoming-some-id-2', 'incoming-some-secret-2', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 200)
         self.assertEqual(text, '{"secret": "to-be-hidden"}')
 
-    def test_post_returns_object(self):
+    def test_get_returns_object(self):
         self.setup_manual()
 
         asyncio.ensure_future(run_application(), loop=self.loop)
         is_http_accepted_eventually()
 
-        url = 'http://127.0.0.1:8080/'
+        url = 'http://127.0.0.1:8080/hawk/'
         auth = auth_header(
-            'incoming-some-id-1', 'incoming-some-secret-1', url, 'POST', '', '',
+            'incoming-some-id-1', 'incoming-some-secret-1', url, 'GET', '', '',
         )
         x_forwarded_for = '1.2.3.4, 4.4.4.4'
-        text, status = self.loop.run_until_complete(post_text(url, auth, x_forwarded_for))
+        text, status, _ = self.loop.run_until_complete(get_text(url, auth, x_forwarded_for))
         self.assertEqual(status, 200)
         self.assertEqual(text, '{"secret": "to-be-hidden"}')
 
@@ -387,51 +474,68 @@ def auth_header(key_id, secret_key, url, method, content, content_type):
     }, url, method, content=content, content_type=content_type).request_header
 
 
-async def post_text(url, auth, x_forwarded_for):
+async def get_text(url, auth, x_forwarded_for):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
             'Authorization': auth,
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
-    return (await result.text(), result.status)
+    return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_auth(url, x_forwarded_for):
+async def get_text_data(url, auth, x_forwarded_for, data):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
+            'Authorization': auth,
             'Content-Type': '',
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
+        }, data=data, timeout=1)
+    return (await result.text(), result.status, result.headers)
+
+
+async def get_text_no_auth(url, x_forwarded_for):
+    async with aiohttp.ClientSession() as session:
+        result = await session.get(url, headers={
+            'Content-Type': '',
+            'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
-    return (await result.text(), result.status)
+    return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_x_forwarded_for(url, auth):
+async def get_text_no_x_forwarded_for(url, auth):
     async with aiohttp.ClientSession() as session:
         headers = {
             'Authorization': auth,
             'Content-Type': '',
+            'X-Forwarded-Proto': 'http',
         }
-        result = await session.post(url, headers=headers, timeout=1)
-    return (await result.text(), result.status)
+        result = await session.get(url, headers=headers, timeout=1)
+    return (await result.text(), result.status, result.headers)
 
 
-async def post_text_no_content_type(url, auth, x_forwarded_for):
+async def get_text_no_content_type(url, auth, x_forwarded_for):
     async with aiohttp.ClientSession() as session:
-        result = await session.post(url, headers={
+        result = await session.get(url, headers={
             'Authorization': auth,
             'X-Forwarded-For': x_forwarded_for,
+            'X-Forwarded-Proto': 'http',
         }, timeout=1)
 
-    return (await result.text(), result.status)
+    return (await result.text(), result.status, result.headers)
 
 
 def mock_env():
     return {
-        'INCOMING_ACCESS_KEY_PAIRS__1__KEY_ID': 'incoming-some-id-1',
-        'INCOMING_ACCESS_KEY_PAIRS__1__SECRET_KEY': 'incoming-some-secret-1',
-        'INCOMING_ACCESS_KEY_PAIRS__2__KEY_ID': 'incoming-some-id-2',
-        'INCOMING_ACCESS_KEY_PAIRS__2__SECRET_KEY': 'incoming-some-secret-2',
+        'INCOMING_ACCESS_KEY_PAIRS_HAWK__1__KEY_ID': 'incoming-some-id-1',
+        'INCOMING_ACCESS_KEY_PAIRS_HAWK__1__SECRET_KEY': 'incoming-some-secret-1',
+        'INCOMING_ACCESS_KEY_PAIRS_HAWK__2__KEY_ID': 'incoming-some-id-2',
+        'INCOMING_ACCESS_KEY_PAIRS_HAWK__2__SECRET_KEY': 'incoming-some-secret-2',
+        'INCOMING_ACCESS_KEY_PAIRS_DIGEST__1__KEY_ID': 'incoming-some-id-1',
+        'INCOMING_ACCESS_KEY_PAIRS_DIGEST__1__SECRET_KEY': 'incoming-some-secret-1',
         'INCOMING_IP_WHITELIST__1': '1.2.3.4',
         'INCOMING_IP_WHITELIST__2': '2.3.4.5',
         'PORT': '8080',
